@@ -246,4 +246,13 @@ cron.schedule('0 2 * * *', () => {
 scheduleAllUsers();
  
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Server on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server on port ${PORT}`);
+ 
+  // ══ Keep-Alive: ضرب النفس كل 10 دقائق لمنع النوم على Render المجاني ══
+  setInterval(() => {
+    fetch('https://qadaa-push-server.onrender.com/')
+      .then(() => console.log('💓 Keep-alive ping'))
+      .catch(e => console.error('Keep-alive error:', e.message));
+  }, 10 * 60 * 1000); // كل 10 دقائق
+});
