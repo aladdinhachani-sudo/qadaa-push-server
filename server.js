@@ -24,11 +24,13 @@ const KEYS  = ['Fajr','Dhuhr','Asr','Maghrib','Isha'];
 const AYAH  = 'فَخَلَفَ مِنۢ بَعْدِهِمْ خَلْفٌ أَضَاعُوا۟ الصَّلَوٰةَ — سورة مريم: ٥٩';
  
 // ══ جلب أوقات الصلاة ══
-// نمرر timezone للـ API لضمان الوقت المحلي الصحيح
+// نحسب التاريخ بتوقيت المستخدم (وليس السيرفر UTC) لتجنب خطأ اليوم
 async function getPrayerTimes(lat, lng, timezone) {
-  const now = new Date();
-  const date = `${now.getDate()}-${now.getMonth()+1}-${now.getFullYear()}`;
   const tz = timezone || 'Africa/Algiers';
+  // احصل على التاريخ الحالي بتوقيت المستخدم
+  const localDate = new Date().toLocaleDateString('en-GB', { timeZone: tz }); // "DD/MM/YYYY"
+  const [day, month, year] = localDate.split('/');
+  const date = `${day}-${month}-${year}`;
   const url = `https://api.aladhan.com/v1/timings/${date}?latitude=${lat}&longitude=${lng}&method=2&timezonestring=${encodeURIComponent(tz)}`;
   const res = await fetch(url);
   const json = await res.json();
@@ -114,11 +116,20 @@ async function scheduleUserNotifications(tokenDoc) {
     const clean = timeStr.split(' ')[0];
     const [h, m] = clean.split(':').map(Number);
     if (isNaN(h) || isNaN(m)) return;
- 
+
+    // احسب الوقت المحلي الحالي للمستخدم
+    const nowLocal = new Date().toLocaleString('en-GB', { timeZone: timezone || 'Africa/Algiers', hour: '2-digit', minute: '2-digit', hour12: false });
+    const [nowH, nowM] = nowLocal.replace(',','').trim().split(':').map(Number);
+    const nowMins = nowH * 60 + nowM;
+    const prayerMins = h * 60 + m;
+
+    // لا تجدول إشعار الصلاة إذا مضى وقتها اليوم (مع هامش دقيقتين)
+    const prayerAlreadyPassed = prayerMins < nowMins - 2;
+
     // ── إشعار 1: عند دخول وقت الصلاة ──
     // cron: "m h * * *"
     const cronExpr1 = `${m} ${h} * * *`;
-    try {
+    if (!prayerAlreadyPassed) try {
       const job1 = cron.schedule(cronExpr1, async () => {
         // تحقق من حالة الصلاة في Firestore لحظة الإرسال
         let done = false;
@@ -145,8 +156,9 @@ async function scheduleUserNotifications(tokenDoc) {
     const [eh, em] = endStr.split(':').map(Number);
     if (isNaN(eh) || isNaN(em)) return;
  
-    // احسب وقت التحذير = نهاية الوقت − 11 دقيقة (هامش دقيقة للـ cron)
-    let wm = em - 11;
+    // احسب وقت التحذير = نهاية الوقت − 10 دقائق بالضبط
+    // نهاية الوقت = بداية الصلاة التالية، فنطرح 10 دقائق منها
+    let wm = em - 10;
     let wh = eh;
     if (wm < 0) { wm += 60; wh -= 1; }
     if (wh < 0) wh = 23;
@@ -236,11 +248,11 @@ app.get('/', (req, res) => res.json({
   time: new Date().toISOString()
 }));
  
-// ══ إعادة جدولة كل يوم الساعة 2:00 فجراً (لليوم الجديد) ══
-cron.schedule('0 2 * * *', () => {
-  console.log('🌙 إعادة جدولة يومية...');
+// ══ إعادة جدولة كل يوم عند منتصف الليل 00:01 (لليوم الجديد) ══
+cron.schedule('1 0 * * *', () => {
+  console.log('🌙 إعادة جدولة يومية عند منتصف الليل...');
   scheduleAllUsers();
-});
+}, { timezone: 'Africa/Algiers' });
  
 // ══ تشغيل فوري عند البدء ══
 scheduleAllUsers();
